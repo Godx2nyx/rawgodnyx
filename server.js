@@ -26,7 +26,7 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: '200kb' }));
 app.use(cookieParser());
 app.use(helmet());
 app.disable('x-powered-by');
