@@ -1,0 +1,95 @@
+const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+
+const app =express();
+
+// ตั้งค่าความปลอดภัยเบื้องต้นด้วย Helmet
+app.use(helmet());
+app.use(express.json());
+
+// ฐานข้อมูลจำลอง (ในโปรเจกต์จริงแนะนำให้เปลี่ยนเป็น MongoDB หรือ PostgreSQL)
+// รูปแบบ: { "id_ลับ": { content: "โค้ดลับด้านใน", protected: true } }
+const database = new Map();
+
+// 1. ระบบป้องกัน Rate Limit สำหรับ API สร้าง (ป้องการยิงรัว / Spam)
+const createLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 นาที
+    max: 10, // อนุญาตให้สร้างได้แค่ 10 ครั้งต่อ 15 นาที ต่อ IP
+    message: { error: "Too many requests, please try again later." }
+});
+
+// 2. ระบบป้องกัน Rate Limit สำหรับการเปิดดู (ป้องกันบอทสแกนหาโค้ด)
+const viewLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 นาที
+    max: 30, // เปิดดูได้ไม่เกิน 30 ครั้งต่อนาทีต่อ IP
+    message: "Rate limit exceeded"
+});
+
+// เสิร์ฟไฟล์ Static หน้าเว็บปลอดภัย
+app.use(express.static(path.join(__dirname, 'public')));
+
+// API สำหรับสร้าง Raw (ต้องใช้ Secret Key ในการสร้าง เพื่อป้องกันไม่ให้คนอื่นมากดสร้างมั่ว)
+app.post('/api/create', createLimiter, (req, res) => {
+    const { secret_key, content } = req.body;
+    
+    // กำหนด Secret Key ของคุณเองตรงนี้ (ควรเก็บเป็น Environment Variable บน Render)
+    const MASTER_KEY = process.env.MASTER_KEY || "GODX2NYX_SUPER_SECRET_KEY";
+
+    if (secret_key !== MASTER_KEY) {
+        return res.status(403).json({ success: false, message: "Unauthorized: Invalid Secret Key" });
+    }
+
+    if (!content) {
+        return res.status(400).json({ success: false, message: "Content is required" });
+    }
+
+    // สร้าง ID แบบสุ่ม
+    const rawId = Math.random().toString(36.substring(2, 10)) + Date.now().toString(36);
+    
+    // บันทึกลงฐานข้อมูล (ซ่อนโค้ดจริงไว้ ไม่ส่งออกไปนอกเซิร์ฟเวอร์เด็ดขาด)
+    database.set(rawId, {
+        content: content,
+        createdAt: Date.now()
+    });
+
+    // ส่งคืนลิงก์
+    const rawUrl = `${req.protocol}://${req.get('host')}/r/${rawId}`;
+    return res.json({ success: true, url: rawUrl, id: rawId });
+});
+
+// Route สำหรับเปิดดูลิงก์ Raw (ไม่ว่าจะมาจาก Browser หรือ Script ในเกม ก็จะเห็นแค่หน้าเว็บหลอก)
+app.get('/r/:id', viewLimiter, (req, res) => {
+    const rawId = req.params.id;
+    
+    // เช็คว่ามี ID นี้จริงไหม (ถ้าไม่มีก็แสดงหน้าเว็บหลอกเหมือนกัน เพื่อความเนียน ไม่ให้รู้ว่ามีตัวตนจริงไหม)
+    const data = database.get(rawId);
+
+    // ส่งไฟล์ HTML ที่แสดงข้อความ GODX2NYX เสมอ ไม่ส่งโค้ดลับออกไปทางหน้าเว็บเด็ดขาด
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// (Option เสริม) API สำหรับดึงโค้ดเฉพาะระบบที่ได้รับอนุญาตจริงๆ (เช่น ผ่าน Backend ของคุณเองที่เก็บ Token ลับไว้)
+app.post('/api/fetch-secure', (req, res) => {
+    const { raw_id, internal_token } = req.body;
+    const INTERNAL_SECRET = process.env.INTERNAL_SECRET || "MY_GAME_SERVER_SECRET";
+
+    if (internal_token !== INTERNAL_SECRET) {
+        return res.status(403).json({ error: "Access Denied" });
+    }
+
+    const data = database.get(raw_id);
+    if (!data) {
+        return res.status(404).json({ error: "Not found" });
+    }
+
+    // ส่งโค้ดจริงให้เฉพาะ Server หรือระบบหลักที่ถือ Token ลับนี้เท่านั้น (เกมฝั่ง Client จะไม่มีทางรู้ Token นี้)
+    return res.json({ content: data.content });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
+
