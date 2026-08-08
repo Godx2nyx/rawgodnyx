@@ -134,10 +134,13 @@ function isToday(dateVal) {
 }
 
 // ---------- Rate limiters ----------
+// validate.trustProxy: false ปิดการเช็คความสอดคล้องของ trust-proxy กับ X-Forwarded-For
+// (จำเป็นเมื่อรันหลัง proxy ของ Render ไม่งั้น express-rate-limit จะโยน error ทำให้ route พังทั้งหมด)
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 20,
     standardHeaders: true, legacyHeaders: false,
+    validate: { trustProxy: false },
     message: { success: false, message: 'Too many attempts, try again later.' }
 });
 
@@ -145,6 +148,7 @@ const publicCreateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 30,
     standardHeaders: true, legacyHeaders: false,
+    validate: { trustProxy: false },
     message: { success: false, message: 'Too many requests, please try again later.' }
 });
 
@@ -152,6 +156,7 @@ const viewLimiter = rateLimit({
     windowMs: 1 * 60 * 1000,
     max: 60,
     standardHeaders: true, legacyHeaders: false,
+    validate: { trustProxy: false },
     message: { success: false, message: 'Rate limit exceeded' }
 });
 
