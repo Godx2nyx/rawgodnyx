@@ -26,7 +26,7 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-app.use(express.json({ limit: '200kb' }));
+app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
 app.use(helmet());
 app.disable('x-powered-by');
@@ -146,6 +146,11 @@ const viewLimiter = rateLimit({
 app.use(express.static(path.join(__dirname, 'public'), {
     dotfiles: 'deny', index: false, redirect: false
 }));
+
+// เสิร์ฟหน้าแรกแบบ explicit (index:false ด้านบนปิดการเสิร์ฟ index.html อัตโนมัติไว้ เพื่อกัน directory listing)
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // ===================== AUTH =====================
 
