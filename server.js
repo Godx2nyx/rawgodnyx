@@ -1,391 +1,424 @@
-<!DOCTYPE html>
-<html lang="th">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GODX2NYX // Raw Manager</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const path = require('path');
+const { Pool } = require('pg');
 
-  :root{
-    --bg:#08090c; --panel:#0f1218; --line:#1d2330;
-    --text:#d7dce3; --dim:#5b6472;
-    --accent:#39ff9c; --accent-dim:#1c8a56; --warn:#ff5c5c;
-    --mono:'JetBrains Mono', monospace; --disp:'Space Grotesk', sans-serif;
-  }
-  *{ box-sizing:border-box; }
-  body{
-    margin:0;
-    background: radial-gradient(circle at 15% 0%, rgba(57,255,156,.06), transparent 40%), var(--bg);
-    color:var(--text); font-family:var(--mono);
-    min-height:100vh; padding:48px 20px 80px;
-  }
+const app = express();
 
-  .topbar{
-    max-width:680px; margin:0 auto 20px;
-    display:flex; align-items:center; justify-content:space-between; gap:12px;
-  }
-  .brand-mark{ font-family:var(--disp); font-weight:700; font-size:20px; }
-  .brand-mark span{ color:var(--accent); }
+const DATABASE_URL = process.env.DATABASE_URL;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
-  .profile-area{ position:relative; }
-  .profile-btn{
-    display:flex; align-items:center; gap:8px;
-    background:var(--panel); border:1px solid var(--line);
-    color:var(--text); padding:8px 14px; border-radius:20px;
-    font-family:var(--mono); font-size:12.5px; cursor:pointer;
-  }
-  .profile-btn:hover{ border-color:var(--accent-dim); }
-  .avatar-dot{ width:7px; height:7px; border-radius:50%; background:var(--dim); }
-  .avatar-dot.online{ background:var(--accent); box-shadow:0 0 6px var(--accent); }
+if (!DATABASE_URL) {
+    console.error('FATAL: DATABASE_URL environment variable is not set.');
+    process.exit(1);
+}
+if (!SESSION_SECRET) {
+    console.error('FATAL: SESSION_SECRET environment variable is not set.');
+    process.exit(1);
+}
 
-  .dropdown{
-    position:absolute; right:0; top:calc(100% + 8px);
-    width:280px; background:var(--panel); border:1px solid var(--line);
-    border-radius:10px; padding:16px; display:none; z-index:20;
-    box-shadow:0 10px 30px rgba(0,0,0,.4);
-  }
-  .dropdown.show{ display:block; }
+const pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
-  .field{ margin-bottom:14px; }
-  .field label{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); margin-bottom:6px; }
-  input[type="text"], input[type="password"], textarea{
-    width:100%; background:#090b0f; border:1px solid var(--line); color:var(--text);
-    padding:10px 11px; border-radius:6px; font-family:var(--mono); font-size:13px; outline:none;
-  }
-  input:focus, textarea:focus{ border-color:var(--accent-dim); }
-
-  button{ font-family:var(--mono); font-weight:700; border:none; border-radius:6px; cursor:pointer; transition:.15s ease; }
-  .btn-primary{ width:100%; background:var(--accent); color:#04140b; padding:11px; font-size:12.5px; }
-  .btn-primary:hover{ background:#57ffb0; }
-  .btn-primary:disabled{ background:var(--line); color:var(--dim); cursor:not-allowed; }
-  .btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--dim); padding:8px 12px; font-size:11.5px; }
-  .btn-ghost:hover{ color:var(--text); border-color:var(--accent-dim); }
-  .btn-danger{ border-color:#5a2323; color:#ff8b8b; }
-  .btn-danger:hover{ border-color:var(--warn); color:var(--warn); }
-
-  .switch-link{ text-align:center; font-size:11.5px; color:var(--dim); margin-top:10px; }
-  .switch-link a{ color:var(--accent); cursor:pointer; text-decoration:none; }
-
-  .logged-in-box .user-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-  .logged-in-box .username{ font-weight:700; color:var(--text); font-size:13px; }
-
-  .key-box{ background:#090b0f; border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:12px; }
-  .key-box .row{ display:flex; gap:8px; margin-top:8px; }
-  .key-usage{ font-size:11px; color:var(--dim); margin-top:8px; }
-  .key-plain{ font-size:11.5px; word-break:break-all; color:var(--accent); background:#04140b; padding:8px; border-radius:4px; margin-top:8px; display:none; }
-
-  .status-rule{
-    max-width:680px; margin:0 auto 32px; height:1px;
-    background:linear-gradient(90deg, var(--accent-dim), transparent 70%); position:relative;
-  }
-  .status-rule::after{ content:''; position:absolute; left:0; top:-2px; width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); }
-
-  .container{ max-width:680px; margin:0 auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
-  .panel-head{ padding:16px 22px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
-  .panel-head h2{ margin:0; font-family:var(--disp); font-size:15px; font-weight:700; }
-  .create-mode-tag{ font-size:10.5px; color:var(--dim); border:1px solid var(--line); padding:3px 8px; border-radius:12px; }
-  .create-mode-tag.owned{ color:var(--accent); border-color:var(--accent-dim); }
-
-  .panel-body{ padding:22px; }
-  textarea#codeContent{ height:170px; resize:vertical; line-height:1.5; }
-  .file-drop{ border:1px dashed var(--line); border-radius:6px; padding:10px 12px; font-size:12.5px; color:var(--dim); margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .file-drop input[type=file]{ font-family:var(--mono); font-size:12px; color:var(--dim); max-width:220px; }
-
-  .result{ margin-top:18px; padding:14px 16px; background:#090b0f; border:1px solid var(--accent-dim); border-radius:6px; display:none; }
-  .result.show{ display:block; }
-  .result .label{ font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); margin-bottom:6px; }
-  .result .link-row{ display:flex; gap:8px; align-items:center; }
-  .result a{ color:var(--accent); text-decoration:none; word-break:break-all; font-size:13px; }
-
-  .toast{
-    position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
-    background:#0f1218; border:1px solid var(--accent-dim); color:var(--text);
-    padding:10px 18px; border-radius:6px; font-size:12.5px; opacity:0; pointer-events:none; transition:.2s ease;
-  }
-  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
-
-  .footer-note{ max-width:680px; margin:22px auto 0; font-size:11px; color:var(--dim); text-align:center; line-height:1.6; }
-</style>
-</head>
-<body>
-
-  <div class="topbar">
-    <div class="brand-mark">GODX2<span>NYX</span></div>
-
-    <div class="profile-area">
-      <button class="profile-btn" id="profileBtn">
-        <span class="avatar-dot" id="avatarDot"></span>
-        <span id="profileLabel">Guest</span>
-      </button>
-
-      <!-- Dropdown: ยังไม่ login -->
-      <div class="dropdown" id="authDropdown">
-        <div id="loginForm">
-          <div class="field">
-            <label>Username</label>
-            <input type="text" id="loginUsername" placeholder="username">
-          </div>
-          <div class="field">
-            <label>Password</label>
-            <input type="password" id="loginPassword" placeholder="••••••••">
-          </div>
-          <button class="btn-primary" onclick="doLogin()">Login</button>
-          <div class="switch-link">ยังไม่มีบัญชี? <a onclick="showRegister()">Register</a></div>
-        </div>
-
-        <div id="registerForm" style="display:none;">
-          <div class="field">
-            <label>Username</label>
-            <input type="text" id="regUsername" placeholder="a-z 0-9 _ (3-20 ตัว)">
-          </div>
-          <div class="field">
-            <label>Password</label>
-            <input type="password" id="regPassword" placeholder="อย่างน้อย 8 ตัว">
-          </div>
-          <button class="btn-primary" onclick="doRegister()">Register</button>
-          <div class="switch-link">มีบัญชีแล้ว? <a onclick="showLogin()">Login</a></div>
-        </div>
-      </div>
-
-      <!-- Dropdown: login แล้ว -->
-      <div class="dropdown" id="profileDropdown">
-        <div class="logged-in-box">
-          <div class="user-row">
-            <span class="username" id="loggedUsername"></span>
-            <button class="btn-ghost btn-danger" onclick="doLogout()">Logout</button>
-          </div>
-
-          <div class="key-box">
-            <label style="font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim);">API Key</label>
-            <div class="row">
-              <button class="btn-ghost" style="flex:1;" onclick="generateKey()">Generate / Reset</button>
-              <button class="btn-ghost" id="copyKeyBtn" onclick="copyKey()">Copy</button>
-            </div>
-            <div class="key-plain" id="keyPlainBox"></div>
-            <div class="key-usage" id="keyUsage">ยังไม่เคยสร้างคีย์</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="status-rule"></div>
-
-  <div class="container">
-    <div class="panel-head">
-      <h2>// create_raw</h2>
-      <span class="create-mode-tag" id="modeTag">Anonymous · ไม่ถูกผูกบัญชี</span>
-    </div>
-
-    <div class="panel-body">
-      <div class="field">
-        <label>Payload</label>
-        <div class="file-drop">
-          <span>โหลดจากไฟล์ (ไม่บังคับ)</span>
-          <input type="file" id="fileInput">
-        </div>
-        <textarea id="codeContent" placeholder="วางโค้ดหรือข้อความที่นี่... (ไม่ต้องใช้ API key)"></textarea>
-      </div>
-
-      <button class="btn-primary" id="submitBtn" onclick="createRaw()">Generate Link</button>
-
-      <div class="result" id="resultBox">
-        <div class="label">Link ที่สร้างแล้ว</div>
-        <div class="link-row">
-          <a id="outputLink" href="#" target="_blank" rel="noopener"></a>
-          <button class="btn-ghost" onclick="copyResultLink()">Copy</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="footer-note">
-    สร้างลิงก์จากหน้านี้ไม่ต้องใช้ API key และเก็บถาวรไม่มีวันหมดอายุ · Login เพื่อผูกบัญชีให้แก้ไข/ลบทีหลังได้ และรับ API key สำหรับเรียกผ่านสคริปต์ภายนอก (14 ครั้ง/วัน)
-  </div>
-
-  <div class="toast" id="toast"></div>
-
-<script>
-  // ดักจับ error ทุกชนิดแล้วโชว์เป็น toast ชั่วคราว เพื่อ debug ว่าปุ่มกดไม่ทำงานเพราะอะไร
-  window.addEventListener('error', function(e){
-    alert('JS Error: ' + e.message + ' (บรรทัด ' + e.lineno + ')');
-  });
-  window.addEventListener('unhandledrejection', function(e){
-    alert('Promise Error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
-  });
-
-  const profileBtn = document.getElementById('profileBtn');
-  const authDropdown = document.getElementById('authDropdown');
-  const profileDropdown = document.getElementById('profileDropdown');
-  const toast = document.getElementById('toast');
-  let currentlyLoggedIn = false;
-  let lastGeneratedKey = '';
-
-  function showToast(msg){
-    toast.textContent = msg;
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 2200);
-  }
-
-  profileBtn.addEventListener('click', () => {
-    (currentlyLoggedIn ? profileDropdown : authDropdown).classList.toggle('show');
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.profile-area')) {
-      authDropdown.classList.remove('show');
-      profileDropdown.classList.remove('show');
+app.use(express.json({ limit: '100kb' }));
+app.use(cookieParser());
+// ปรับ CSP ให้อนุญาต inline script/style (หน้าเว็บเราเขียน JS/CSS ฝังในไฟล์ html โดยตรง)
+// และอนุญาตโหลดฟอนต์จาก Google Fonts ที่ index.html/view.html เรียกใช้
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+            fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+            imgSrc: ["'self'", 'data:'],
+            connectSrc: ["'self'"]
+        }
     }
-  });
+}));
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
-  function showRegister(){ document.getElementById('loginForm').style.display='none'; document.getElementById('registerForm').style.display='block'; }
-  function showLogin(){ document.getElementById('registerForm').style.display='none'; document.getElementById('loginForm').style.display='block'; }
+const MAX_CONTENT_LENGTH = 50000;
+const KEY_PREFIX = 'gdx_';
+const DAILY_API_LIMIT = 14;
+const COOKIE_NAME = 'gdx_session';
 
-  async function refreshAuthState(){
+// ---------- Schema ----------
+async function initDb() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            api_key_hash TEXT,
+            api_daily_count INTEGER NOT NULL DEFAULT 0,
+            api_usage_date DATE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    `);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS raws (
+            id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_raws_owner ON raws(owner_id);`);
+}
+
+// ---------- Hashing helpers (scrypt, no extra native deps) ----------
+function hashSecret(plaintext) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(plaintext, salt, 64).toString('hex');
+    return `${salt}:${hash}`;
+}
+function verifySecret(plaintext, stored) {
+    if (!stored) return false;
+    const [salt, hash] = stored.split(':');
+    if (!salt || !hash) return false;
+    const check = crypto.scryptSync(plaintext, salt, 64).toString('hex');
+    const a = Buffer.from(hash, 'hex');
+    const b = Buffer.from(check, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function generateApiKey() {
+    return KEY_PREFIX + crypto.randomBytes(24).toString('base64url');
+}
+function generateRawId() {
+    return crypto.randomBytes(16).toString('base64url');
+}
+
+// ---------- Auth helpers ----------
+function setSessionCookie(res, user) {
+    const token = jwt.sign({ id: user.id, username: user.username }, SESSION_SECRET, { expiresIn: '30d' });
+    res.cookie(COOKIE_NAME, token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 30 * 24 * 60 * 60 * 1000
+    });
+}
+
+// เติม req.user ถ้ามี session ที่ valid (ไม่บังคับ ใช้เพื่อผูกความเป็นเจ้าของตอนสร้าง raw)
+function attachUserIfLoggedIn(req, res, next) {
+    const token = req.cookies?.[COOKIE_NAME];
+    if (!token) return next();
     try {
-      const res = await fetch('/api/auth/me');
-      const data = await res.json();
-      currentlyLoggedIn = !!data.loggedIn;
-
-      document.getElementById('avatarDot').classList.toggle('online', currentlyLoggedIn);
-      document.getElementById('profileLabel').textContent = currentlyLoggedIn ? data.username : 'Guest';
-      document.getElementById('modeTag').textContent = currentlyLoggedIn
-        ? 'Logged in · ผูกกับบัญชี ' + data.username
-        : 'Anonymous · ไม่ถูกผูกบัญชี';
-      document.getElementById('modeTag').classList.toggle('owned', currentlyLoggedIn);
-
-      if (currentlyLoggedIn) {
-        document.getElementById('loggedUsername').textContent = data.username;
-        refreshKeyStatus();
-      }
-    } catch {}
-  }
-
-  async function doLogin(){
-    const username = document.getElementById('loginUsername').value.trim();
-    const password = document.getElementById('loginPassword').value;
-    if (!username || !password) return showToast('กรอกให้ครบ');
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (!data.success) return showToast(data.message);
-      showToast('Login สำเร็จ');
-      authDropdown.classList.remove('show');
-      refreshAuthState();
-    } catch { showToast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
-  }
-
-  async function doRegister(){
-    const username = document.getElementById('regUsername').value.trim();
-    const password = document.getElementById('regPassword').value;
-    if (!username || !password) return showToast('กรอกให้ครบ');
-
-    try {
-      const res = await fetch('/api/auth/register', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (!data.success) return showToast(data.message);
-      showToast('สมัครสำเร็จ');
-      authDropdown.classList.remove('show');
-      refreshAuthState();
-    } catch { showToast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
-  }
-
-  async function doLogout(){
-    await fetch('/api/auth/logout', { method:'POST' });
-    profileDropdown.classList.remove('show');
-    document.getElementById('keyPlainBox').style.display = 'none';
-    showToast('ออกจากระบบแล้ว');
-    refreshAuthState();
-  }
-
-  async function refreshKeyStatus(){
-    try {
-      const res = await fetch('/api/keys/status');
-      const data = await res.json();
-      if (!data.success) return;
-      document.getElementById('keyUsage').textContent = data.hasKey
-        ? `ใช้ไปแล้ว ${data.usageToday}/${data.dailyLimit} ครั้งวันนี้`
-        : 'ยังไม่เคยสร้างคีย์';
-    } catch {}
-  }
-
-  async function generateKey(){
-    try {
-      const res = await fetch('/api/keys/generate', { method:'POST' });
-      const data = await res.json();
-      if (!data.success) return showToast(data.message);
-      lastGeneratedKey = data.api_key;
-      const box = document.getElementById('keyPlainBox');
-      box.textContent = data.api_key;
-      box.style.display = 'block';
-      showToast('สร้างคีย์ใหม่แล้ว — คัดลอกเก็บไว้เลย');
-      refreshKeyStatus();
-    } catch { showToast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'); }
-  }
-
-  async function copyKey(){
-    if (!lastGeneratedKey) return showToast('ยังไม่มีคีย์ที่สร้างในรอบนี้ กด Generate ก่อน');
-    try { await navigator.clipboard.writeText(lastGeneratedKey); showToast('คัดลอกคีย์แล้ว'); }
-    catch { showToast('คัดลอกไม่สำเร็จ'); }
-  }
-
-  document.getElementById('fileInput').addEventListener('change', (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => { document.getElementById('codeContent').value = e.target.result; };
-    reader.readAsText(file);
-  });
-
-  async function copyResultLink(){
-    const link = document.getElementById('outputLink').href;
-    try { await navigator.clipboard.writeText(link); showToast('Copied link'); }
-    catch { showToast('Copy failed'); }
-  }
-
-  async function createRaw(){
-    const content = document.getElementById('codeContent').value;
-    if (!content) { showToast('กรุณาใส่เนื้อหาหรืออัปโหลดไฟล์'); return; }
-
-    const submitBtn = document.getElementById('submitBtn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Generating...';
-
-    try {
-      const response = await fetch('/api/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }) // ไม่ส่ง key จากหน้าเว็บ — ผูกบัญชีผ่าน session แทนถ้า login อยู่
-      });
-
-      const data = await response.json();
-      const resultBox = document.getElementById('resultBox');
-      const outputLink = document.getElementById('outputLink');
-
-      if (data.success) {
-        outputLink.href = data.url;
-        outputLink.textContent = data.url;
-        resultBox.classList.add('show');
-        showToast(data.owned ? 'สร้างลิงก์แล้ว (ผูกบัญชี แก้ไข/ลบได้)' : 'สร้างลิงก์แล้ว (anonymous)');
-      } else {
-        resultBox.classList.remove('show');
-        showToast('Error: ' + (data.message || 'Request failed'));
-      }
-    } catch { showToast('Failed to connect to server'); }
-    finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Generate Link';
+        req.user = jwt.verify(token, SESSION_SECRET);
+    } catch {
+        // token ไม่ valid/หมดอายุ ถือว่าไม่ได้ login
     }
-  }
+    next();
+}
 
-  refreshAuthState();
-</script>
-</body>
-</html>
+function requireLogin(req, res, next) {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Login required' });
+    next();
+}
+
+function isToday(dateVal) {
+    const d = new Date(dateVal);
+    const now = new Date();
+    return d.getUTCFullYear() === now.getUTCFullYear() &&
+           d.getUTCMonth() === now.getUTCMonth() &&
+           d.getUTCDate() === now.getUTCDate();
+}
+
+// ---------- Rate limiters ----------
+// validate.trustProxy: false ปิดการเช็คความสอดคล้องของ trust-proxy กับ X-Forwarded-For
+// (จำเป็นเมื่อรันหลัง proxy ของ Render ไม่งั้น express-rate-limit จะโยน error ทำให้ route พังทั้งหมด)
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true, legacyHeaders: false,
+    validate: { trustProxy: false },
+    message: { success: false, message: 'Too many attempts, try again later.' }
+});
+
+const publicCreateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true, legacyHeaders: false,
+    validate: { trustProxy: false },
+    message: { success: false, message: 'Too many requests, please try again later.' }
+});
+
+const viewLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 60,
+    standardHeaders: true, legacyHeaders: false,
+    validate: { trustProxy: false },
+    message: { success: false, message: 'Rate limit exceeded' }
+});
+
+// ---------- Static ----------
+app.use(express.static(path.join(__dirname, 'public'), {
+    dotfiles: 'deny', index: false, redirect: false
+}));
+
+// เสิร์ฟหน้าแรกแบบ explicit (index:false ด้านบนปิดการเสิร์ฟ index.html อัตโนมัติไว้ เพื่อกัน directory listing)
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ===================== AUTH =====================
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+    const { username, password } = req.body || {};
+
+    if (typeof username !== 'string' || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+        return res.status(400).json({ success: false, message: 'Username ต้องเป็น a-z A-Z 0-9 _ ยาว 3-20 ตัว' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+        return res.status(400).json({ success: false, message: 'Password ต้องยาวอย่างน้อย 8 ตัว' });
+    }
+
+    try {
+        const exists = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+        if (exists.rows.length > 0) {
+            return res.status(409).json({ success: false, message: 'Username นี้มีคนใช้แล้ว' });
+        }
+
+        const passwordHash = hashSecret(password);
+        const { rows } = await pool.query(
+            'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username',
+            [username, passwordHash]
+        );
+
+        setSessionCookie(res, rows[0]);
+        res.json({ success: true, username: rows[0].username });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Registration failed' });
+    }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+    const { username, password } = req.body || {};
+    if (typeof username !== 'string' || typeof password !== 'string') {
+        return res.status(400).json({ success: false, message: 'Missing credentials' });
+    }
+
+    try {
+        const { rows } = await pool.query('SELECT id, username, password_hash FROM users WHERE username = $1', [username]);
+        const user = rows[0];
+
+        if (!user || !verifySecret(password, user.password_hash)) {
+            return res.status(401).json({ success: false, message: 'Username หรือ password ไม่ถูกต้อง' });
+        }
+
+        setSessionCookie(res, user);
+        res.json({ success: true, username: user.username });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Login failed' });
+    }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie(COOKIE_NAME);
+    res.json({ success: true });
+});
+
+app.get('/api/auth/me', attachUserIfLoggedIn, (req, res) => {
+    if (!req.user) return res.json({ success: true, loggedIn: false });
+    res.json({ success: true, loggedIn: true, username: req.user.username });
+});
+
+// ===================== API KEY MANAGEMENT (ต้อง login) =====================
+
+app.get('/api/keys/status', attachUserIfLoggedIn, requireLogin, async (req, res) => {
+    const { rows } = await pool.query('SELECT api_key_hash, api_daily_count, api_usage_date FROM users WHERE id = $1', [req.user.id]);
+    const u = rows[0];
+    res.json({
+        success: true,
+        hasKey: !!u.api_key_hash,
+        usageToday: u.api_usage_date && isToday(u.api_usage_date) ? u.api_daily_count : 0,
+        dailyLimit: DAILY_API_LIMIT
+    });
+});
+
+// ปุ่มเดียวใช้ทั้ง Generate ครั้งแรก และ Reset (สร้างใหม่ทับของเดิม)
+app.post('/api/keys/generate', authLimiter, attachUserIfLoggedIn, requireLogin, async (req, res) => {
+    const plainKey = generateApiKey();
+    const keyHash = hashSecret(plainKey);
+
+    try {
+        await pool.query(
+            'UPDATE users SET api_key_hash = $1, api_daily_count = 0, api_usage_date = NULL WHERE id = $2',
+            [keyHash, req.user.id]
+        );
+        res.json({
+            success: true,
+            api_key: plainKey,
+            warning: 'เก็บคีย์นี้ไว้ให้ดี ระบบจะไม่แสดงซ้ำอีก — ถ้าลืมให้กด Reset เพื่อสร้างใหม่'
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Failed to generate key' });
+    }
+});
+
+// ===================== RAW CREATE =====================
+// - มี session (login จากหน้าเว็บ) -> ผูกความเป็นเจ้าของ ไม่หักโควต้า API
+// - ไม่มี session แต่ส่ง api_key -> เรียกผ่าน API ภายนอก, หักโควต้า 14 ครั้ง/วัน
+// - ไม่มีทั้งคู่ -> สร้างแบบ anonymous เปิดให้ทุกคน (จำกัดด้วย IP rate limit เท่านั้น)
+app.post('/api/create', publicCreateLimiter, attachUserIfLoggedIn, async (req, res) => {
+    const { content, api_key } = req.body || {};
+
+    if (typeof content !== 'string' || content.trim().length === 0) {
+        return res.status(400).json({ success: false, message: 'Content is required and must be a non-empty string' });
+    }
+    if (content.length > MAX_CONTENT_LENGTH) {
+        return res.status(413).json({ success: false, message: `Content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters` });
+    }
+
+    let ownerId = null;
+
+    try {
+        if (req.user) {
+            ownerId = req.user.id;
+        } else if (typeof api_key === 'string' && api_key.startsWith(KEY_PREFIX)) {
+            const { rows } = await pool.query(
+                'SELECT id, api_key_hash, api_daily_count, api_usage_date FROM users WHERE api_key_hash IS NOT NULL'
+            );
+            const match = rows.find(r => verifySecret(api_key, r.api_key_hash));
+
+            if (!match) {
+                return res.status(403).json({ success: false, message: 'Invalid API key' });
+            }
+
+            const usedToday = match.api_usage_date && isToday(match.api_usage_date) ? match.api_daily_count : 0;
+            if (usedToday >= DAILY_API_LIMIT) {
+                return res.status(429).json({ success: false, message: `Daily API limit reached (${DAILY_API_LIMIT}/day)` });
+            }
+
+            await pool.query(
+                'UPDATE users SET api_daily_count = $1, api_usage_date = CURRENT_DATE WHERE id = $2',
+                [usedToday + 1, match.id]
+            );
+            ownerId = match.id;
+        }
+
+        const rawId = generateRawId();
+        await pool.query(
+            'INSERT INTO raws (id, content, owner_id) VALUES ($1, $2, $3)',
+            [rawId, content, ownerId]
+        );
+
+        const rawUrl = `${req.protocol}://${req.get('host')}/r/${rawId}`;
+        res.json({ success: true, url: rawUrl, id: rawId, owned: ownerId !== null });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Failed to save content' });
+    }
+});
+
+// ===================== RAW VIEW / EDIT / DELETE =====================
+
+app.get('/r/:id', viewLimiter, (req, res) => {
+    if (!/^[A-Za-z0-9_-]{10,40}$/.test(req.params.id)) {
+        return res.status(404).send('Not found');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'view.html'));
+});
+
+app.get('/api/raw/:id', viewLimiter, attachUserIfLoggedIn, async (req, res) => {
+    const rawId = req.params.id;
+    if (!/^[A-Za-z0-9_-]{10,40}$/.test(rawId)) {
+        return res.status(400).json({ success: false, message: 'Invalid id format' });
+    }
+
+    try {
+        const { rows } = await pool.query(
+            'SELECT id, content, owner_id, created_at, updated_at FROM raws WHERE id = $1',
+            [rawId]
+        );
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Not found' });
+        }
+
+        const raw = rows[0];
+        const isOwner = !!(req.user && raw.owner_id === req.user.id);
+
+        res.json({
+            success: true,
+            id: raw.id,
+            content: raw.content,
+            created_at: raw.created_at,
+            updated_at: raw.updated_at,
+            isOwner
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+
+app.patch('/api/raw/:id', publicCreateLimiter, attachUserIfLoggedIn, requireLogin, async (req, res) => {
+    const rawId = req.params.id;
+    const { content } = req.body || {};
+
+    if (typeof content !== 'string' || content.trim().length === 0) {
+        return res.status(400).json({ success: false, message: 'Content is required' });
+    }
+    if (content.length > MAX_CONTENT_LENGTH) {
+        return res.status(413).json({ success: false, message: `Content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters` });
+    }
+
+    try {
+        const { rows } = await pool.query('SELECT owner_id FROM raws WHERE id = $1', [rawId]);
+        if (rows.length === 0) return res.status(404).json({ success: false, message: 'Not found' });
+        if (rows[0].owner_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your raw' });
+
+        await pool.query('UPDATE raws SET content = $1, updated_at = now() WHERE id = $2', [content, rawId]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+
+app.delete('/api/raw/:id', publicCreateLimiter, attachUserIfLoggedIn, requireLogin, async (req, res) => {
+    const rawId = req.params.id;
+    try {
+        const { rows } = await pool.query('SELECT owner_id FROM raws WHERE id = $1', [rawId]);
+        if (rows.length === 0) return res.status(404).json({ success: false, message: 'Not found' });
+        if (rows[0].owner_id !== req.user.id) return res.status(403).json({ success: false, message: 'Not your raw' });
+
+        await pool.query('DELETE FROM raws WHERE id = $1', [rawId]);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+});
+
+app.get('/api/raws/mine', attachUserIfLoggedIn, requireLogin, async (req, res) => {
+    const { rows } = await pool.query(
+        'SELECT id, LEFT(content, 80) AS preview, created_at, updated_at FROM raws WHERE owner_id = $1 ORDER BY created_at DESC LIMIT 100',
+        [req.user.id]
+    );
+    res.json({ success: true, raws: rows });
+});
+
+app.use((req, res) => res.status(404).json({ success: false, message: 'Not found' }));
+app.use((err, req, res, next) => {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+});
+
+const PORT = process.env.PORT || 3000;
+
+initDb()
+    .then(() => app.listen(PORT, () => console.log(`Server is running on port ${PORT}`)))
+    .catch(err => { console.error('Failed to initialize database:', err); process.exit(1); });
