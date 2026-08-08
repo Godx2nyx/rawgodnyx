@@ -207,6 +207,14 @@
   <div class="toast" id="toast"></div>
 
 <script>
+  // ดักจับ error ทุกชนิดแล้วโชว์เป็น toast ชั่วคราว เพื่อ debug ว่าปุ่มกดไม่ทำงานเพราะอะไร
+  window.addEventListener('error', function(e){
+    alert('JS Error: ' + e.message + ' (บรรทัด ' + e.lineno + ')');
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    alert('Promise Error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+
   const profileBtn = document.getElementById('profileBtn');
   const authDropdown = document.getElementById('authDropdown');
   const profileDropdown = document.getElementById('profileDropdown');
@@ -381,4 +389,3 @@
 </script>
 </body>
 </html>
-
