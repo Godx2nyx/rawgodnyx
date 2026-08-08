@@ -28,7 +28,20 @@ const pool = new Pool({
 
 app.use(express.json({ limit: '100kb' }));
 app.use(cookieParser());
-app.use(helmet());
+// ปรับ CSP ให้อนุญาต inline script/style (หน้าเว็บเราเขียน JS/CSS ฝังในไฟล์ html โดยตรง)
+// และอนุญาตโหลดฟอนต์จาก Google Fonts ที่ index.html/view.html เรียกใช้
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+            fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+            imgSrc: ["'self'", 'data:'],
+            connectSrc: ["'self'"]
+        }
+    }
+}));
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
